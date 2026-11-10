@@ -1,0 +1,91 @@
+name: m2l9-laboratorio
+
+services:
+  kafka:
+    image: apache/kafka:4.0.2
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+    healthcheck:
+      test: [CMD, /opt/kafka/bin/kafka-topics.sh, --bootstrap-server, 'kafka:9092', --list]
+      interval: 10s
+      timeout: 8s
+      retries: 15
+      start_period: 15s
+
+  namenode:
+    image: apache/hadoop:3.4.1
+    platform: linux/amd64
+    hostname: namenode
+    user: "0:0"
+    environment:
+      HADOOP_CONF_DIR: /lab-conf
+      HADOOP_HEAPSIZE_MAX: 512m
+    volumes:
+      - ./hadoop:/lab-conf:ro
+      - hdfs_nombre:/data/name
+    ports:
+      - "127.0.0.1:19870:9870"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        if [ ! -f /data/name/current/VERSION ]; then
+          /opt/hadoop/bin/hdfs namenode -format -nonInteractive
+        fi
+        exec /opt/hadoop/bin/hdfs namenode
+    healthcheck:
+      test: [CMD-SHELL, '/opt/hadoop/bin/hdfs dfsadmin -safemode get 2>/dev/null | grep -q "Safe mode is OFF" && /opt/hadoop/bin/hdfs dfsadmin -report 2>/dev/null | grep -q "Live datanodes (1)"']
+      interval: 10s
+      timeout: 8s
+      retries: 18
+      start_period: 20s
+
+  datanode:
+    image: apache/hadoop:3.4.1
+    platform: linux/amd64
+    hostname: datanode
+    user: "0:0"
+    depends_on:
+      - namenode
+    environment:
+      HADOOP_CONF_DIR: /lab-conf
+      HADOOP_HEAPSIZE_MAX: 512m
+    volumes:
+      - ./hadoop:/lab-conf:ro
+      - hdfs_datos:/data/data
+    entrypoint: ["/opt/hadoop/bin/hdfs"]
+    command: ["datanode"]
+
+  spark:
+    image: apache/spark:4.1.3-scala2.13-java17-python3-r-ubuntu
+    profiles: ["trabajos"]
+    working_dir: /tmp
+    volumes:
+      - ./reporte.py:/lab/reporte.py:ro
+    entrypoint: ["/opt/spark/bin/spark-submit"]
+    command:
+      - --master
+      - local[2]
+      - --driver-memory
+      - 768m
+      - --conf
+      - spark.ui.enabled=false
+      - --conf
+      - spark.hadoop.dfs.client.use.datanode.hostname=true
+      - /lab/reporte.py
+
+volumes:
+  hdfs_nombre:
+  hdfs_datos:
